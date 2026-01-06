@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ESG Dashboard - {{ client_id }}</title>
+
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js"></script>
+
+  <style>
+    /* Keep your exact CSS here.
+       For demo, I'm keeping only minimal styles. You can paste your full CSS from esg_part13_html_dashboard.py */
+    body { font-family: Arial, sans-serif; padding: 20px; }
+    .box { padding: 12px; border: 1px solid #ddd; border-radius: 10px; margin-bottom: 12px; }
+    .error { color: #b00020; font-weight: bold; }
+  </style>
+</head>
+
+<body>
+  <div class="box">
+    <h2>📊 ESG Reporting Dashboard (TRIAL)</h2>
+    <div><b>Client:</b> {{ client_id }}</div>
+    <div><b>Valid until:</b> {{ window_expires_at }} (UTC)</div>
+    <div><b>Views used:</b> {{ views_used }}/{{ max_views }}</div>
+  </div>
+
+  <div id="status" class="box">Loading data...</div>
+
+  <!-- Your whole UI blocks go here (tabs, charts, search, cards, etc.)
+       You can paste them exactly from your current generated HTML -->
+  <div id="app" class="box" style="display:none;">
+    <h3>✅ Data loaded (UI can render now)</h3>
+    <div id="totalIndicators"></div>
+
+    <div style="height:300px;">
+      <canvas id="esgChart"></canvas>
+    </div>
+
+    <div id="resultsContainer"></div>
+  </div>
+
+  <script>
+    let data = {};        // same variable name as your current code
+    let charts = {};
+
+    async function loadData() {
+      const status = document.getElementById("status");
+      try {
+        const r = await fetch(`/api/data/{{ client_id }}`);
+        if (!r.ok) throw new Error("Access expired or blocked");
+        const payload = await r.json();
+
+        // IMPORTANT:
+        // Your current dashboard expects: data = { indicatorName: {value, category, type, unit}, ... }
+        // So we store that exactly in `data`.
+        data = payload.data || payload; // if you push under payload["data"], use payload.data
+
+        status.innerHTML = "✅ Data loaded. Rendering UI...";
+        document.getElementById("app").style.display = "block";
+
+        updateStats();
+        initCharts();
+        renderSomeCards();
+        status.innerHTML = "✅ Dashboard ready.";
+      } catch (e) {
+        status.innerHTML = `<div class="error">⛔ ${e.message}</div>
+          <div>If you are in trial, you may have reached the 24h/3-views limit.</div>`;
+      }
+    }
+
+    function updateStats() {
+      const total = Object.keys(data).length;
+      document.getElementById("totalIndicators").textContent = "Total indicators: " + total;
+    }
+
+    function initCharts() {
+      const esgData = Object.entries(data)
+        .filter(([_, i]) => i.category === "CPC" && i.type === "Montant")
+        .slice(0, 8);
+
+      const ctx = document.getElementById("esgChart");
+      charts.esg = new Chart(ctx, {
+        type: "bar",
+        data: { labels: esgData.map(([n]) => n),
+          datasets: [{ data: esgData.map(([_, i]) => i.value) }]
+        },
+        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+      });
+    }
+
+    function renderSomeCards() {
+      const container = document.getElementById("resultsContainer");
+      container.innerHTML = "";
+      Object.entries(data).slice(0, 12).forEach(([name, info]) => {
+        const div = document.createElement("div");
+        div.className = "box";
+        div.innerHTML = `<b>${name}</b><br>${info.value} ${info.unit} <br><small>${info.category} / ${info.type}</small>`;
+        container.appendChild(div);
+      });
+    }
+
+    loadData();
+  </script>
+</body>
+</html>
