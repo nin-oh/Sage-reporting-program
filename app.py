@@ -4,19 +4,26 @@ import sqlite3
 from datetime import datetime, timedelta, timezone
 from flask import Flask, request, jsonify, abort, render_template
 
+# ==========================================================
+#  Flask app for Render (B1)
+#  - POST /push-data   (your laptop pushes JSON with X-API-KEY)
+#  - GET  /report/<id> (client opens UI)
+#  - GET  /api/report/<id> (UI fetches JSON)
+#  - GET  /health
+# ==========================================================
+
 app = Flask(__name__)
+
+# ---- Env vars (set in Render dashboard) ----
+API_KEY = os.getenv("API_KEY", "")
+TRIAL_DAYS = int(os.getenv("TRIAL_DAYS", "3"))                 # total trial duration from first push/open
+MAX_VIEWS = int(os.getenv("MAX_VIEWS", "3"))                   # number of 24h windows
+HTML_VALID_HOURS = int(os.getenv("HTML_VALID_HOURS", "24"))    # each window duration
 
 DB_PATH = os.getenv("DB_PATH", "data.db")
 
-# Trial rules
-TRIAL_DAYS = int(os.getenv("TRIAL_DAYS", "3"))          # total trial window
-MAX_VIEWS = int(os.getenv("MAX_VIEWS", "3"))            # how many 24h windows max
-HTML_VALID_HOURS = int(os.getenv("HTML_VALID_HOURS", "24"))
 
-# Security: only YOU can push data
-API_KEY = os.getenv("API_KEY", "")
-
-
+# -------------------- DB helpers --------------------
 def db():
     con = sqlite3.connect(DB_PATH)
     con.row_factory = sqlite3.Row
@@ -49,11 +56,6 @@ def _ensure_db():
     init_db()
 
 
-@app.get("/health")
-def health():
-    return {"ok": True}
-
-
 def now_utc():
     return datetime.now(timezone.utc)
 
@@ -64,30 +66,35 @@ def parse_dt(s: str | None):
     return datetime.fromisoformat(s)
 
 
-def trial_active(trial_start_iso: str) -> bool:
+def require_api_key():
+    if not API_KEY:
+        abort(500, description="API_KEY not configured on server")
+    if request.headers.get("X-API-KEY") != API_KEY:
+        abort(403)
+
+
+def trial_is_active(trial_start_iso: str) -> bool:
     start = datetime.fromisoformat(trial_start_iso)
     return now_utc() <= (start + timedelta(days=TRIAL_DAYS))
 
 
-def ensure_valid_window(client_row) -> tuple[bool, str]:
+def ensure_access_window(client_row) -> tuple[bool, str]:
     """
-    Returns: (allowed, message)
-    - Ensures the client has an active 24h access window.
-    - If window expired, consumes 1 view and creates a new 24h window (if views remain).
+    Ensures a valid access window exists.
+    - If trial ended => deny
+    - If window missing/expired => consume a view and open a new 24h window (if views remain)
     """
-    if not trial_active(client_row["trial_start"]):
+    if not trial_is_active(client_row["trial_start"]):
         return False, "Trial ended"
 
-    window_exp = parse_dt(client_row["window_expires_at"])
     n = now_utc()
+    window_exp = parse_dt(client_row["window_expires_at"])
 
-    # If first time or expired: open a new 24h window (consume one view)
     if (window_exp is None) or (n > window_exp):
         if client_row["views_used"] >= MAX_VIEWS:
             return False, "Trial limit reached"
 
         new_exp = n + timedelta(hours=HTML_VALID_HOURS)
-
         con = db()
         con.execute(
             "UPDATE clients SET views_used = views_used + 1, window_expires_at = ? WHERE client_id = ?",
@@ -99,25 +106,52 @@ def ensure_valid_window(client_row) -> tuple[bool, str]:
     return True, "OK"
 
 
+# -------------------- Routes --------------------
+@app.get("/health")
+def health():
+    return {"ok": True}
+
+
+@app.get("/")
+def home():
+    return {
+        "service": "sage-reporting-program",
+        "ok": True,
+        "endpoints": {
+            "health": "/health",
+            "push_data": "POST /push-data (X-API-KEY)",
+            "report_page": "/report/<client_id>",
+            "report_api": "/api/report/<client_id>",
+        }
+    }
+
+
 @app.post("/push-data")
 def push_data():
-    # Only you can call this
-    if not API_KEY or request.headers.get("X-API-KEY") != API_KEY:
-        abort(403)
+    """
+    Your local program calls this to upload the computed dashboard data.
+    Header: X-API-KEY: <API_KEY>
+    JSON payload example:
+    {
+      "client_id": "RELAISMEDICAL",
+      "year": 2025,
+      "data": { "CA": {"value":..., "category":"CPC", "type":"Montant", "unit":"MAD"}, ... }
+    }
+    """
+    require_api_key()
 
-    payload = request.get_json(force=True)
-
+    payload = request.get_json(force=True) or {}
     client_id = (payload.get("client_id") or "").strip()
     if not client_id:
-        return jsonify({"error": "client_id is required"}), 400
+        return jsonify({"ok": False, "error": "client_id is required"}), 400
 
     updated_at = now_utc().isoformat()
 
+    # Store entire payload (so we can return year + meta later)
     con = db()
 
-    # Create trial record if new client
-    existing = con.execute("SELECT * FROM clients WHERE client_id = ?", (client_id,)).fetchone()
-    if not existing:
+    client = con.execute("SELECT * FROM clients WHERE client_id = ?", (client_id,)).fetchone()
+    if not client:
         con.execute(
             "INSERT INTO clients (client_id, trial_start, views_used, window_expires_at) VALUES (?,?,0,NULL)",
             (client_id, updated_at)
@@ -132,14 +166,15 @@ def push_data():
     con.commit()
     con.close()
 
-    return jsonify({
-        "ok": True,
-        "public_path": f"/report/{client_id}"
-    })
+    return jsonify({"ok": True, "public_path": f"/report/{client_id}"})
 
 
 @app.get("/report/<client_id>")
-def report(client_id):
+def report_page(client_id):
+    """
+    Serves YOUR UI (templates/report.html).
+    The UI will fetch JSON from /api/report/<client_id>.
+    """
     con = db()
     client = con.execute("SELECT * FROM clients WHERE client_id = ?", (client_id,)).fetchone()
     payload_row = con.execute("SELECT payload FROM payloads WHERE client_id = ?", (client_id,)).fetchone()
@@ -148,51 +183,79 @@ def report(client_id):
     if not client or not payload_row:
         return "No data available yet. Please contact provider.", 404
 
-    allowed, msg = ensure_valid_window(client)
+    allowed, msg = ensure_access_window(client)
     if not allowed:
         return f"⛔ Access refused: {msg}", 403
 
-    # Re-read to get updated window & views
+    # Re-read after possible update
     con = db()
     client2 = con.execute("SELECT * FROM clients WHERE client_id = ?", (client_id,)).fetchone()
+    payload = json.loads(payload_row["payload"])
     con.close()
 
-    window_exp = client2["window_expires_at"]
-    views_used = client2["views_used"]
-
-    # Render your SAME UI template; it will fetch JSON from /api/data/<client_id>
+    year = payload.get("year", "")
+    # Your HTML figures out client_id from URL, but we can still pass metadata if you want.
     return render_template(
-        "dashboard.html",
+        "report.html",
         client_id=client_id,
-        window_expires_at=window_exp,
-        views_used=views_used,
+        year=year,
+        window_expires_at=client2["window_expires_at"],
+        views_used=client2["views_used"],
         max_views=MAX_VIEWS
     )
 
 
-@app.get("/api/data/<client_id>")
-def api_data(client_id):
+@app.get("/api/report/<client_id>")
+def report_api(client_id):
+    """
+    Returns JSON for the UI.
+    Only accessible if within current access window.
+    """
     con = db()
     client = con.execute("SELECT * FROM clients WHERE client_id = ?", (client_id,)).fetchone()
-    payload_row = con.execute("SELECT payload FROM payloads WHERE client_id = ?", (client_id,)).fetchone()
+    payload_row = con.execute("SELECT payload, updated_at FROM payloads WHERE client_id = ?", (client_id,)).fetchone()
     con.close()
 
     if not client or not payload_row:
         abort(404)
 
-    # Must be inside current 24h window
-    if not trial_active(client["trial_start"]):
+    # must be active trial
+    if not trial_is_active(client["trial_start"]):
         abort(403)
 
+    # must be inside current window
     window_exp = parse_dt(client["window_expires_at"])
     if window_exp is None or now_utc() > window_exp:
         abort(403)
 
     payload = json.loads(payload_row["payload"])
-    # You can add watermark info here
-    payload["_trial"] = {
-        "valid_until": client["window_expires_at"],
-        "views_used": client["views_used"],
-        "max_views": MAX_VIEWS
-    }
-    return jsonify(payload)
+    updated_at = payload_row["updated_at"]
+
+    # Friendly updated_at string for your header
+    try:
+        dt = datetime.fromisoformat(updated_at)
+        updated_str = dt.astimezone(timezone.utc).strftime("%d/%m/%Y %H:%M UTC")
+    except Exception:
+        updated_str = updated_at
+
+    # Ensure shape expected by your HTML
+    # payload must contain "data" dict
+    data = payload.get("data", {})
+    year = payload.get("year", "")
+
+    return jsonify({
+        "client": client_id,
+        "year": year,
+        "updated_at": updated_str,
+        "trial": {
+            "valid_until": client["window_expires_at"],
+            "views_used": client["views_used"],
+            "views_max": MAX_VIEWS
+        },
+        "data": data
+    })
+
+
+# Local dev only (Render uses gunicorn)
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", "5000")))
