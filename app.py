@@ -1,37 +1,36 @@
+"""
+UPDATED app.py for Render with Excel Download Support
+
+Changes from original:
+1. Stores excel_filename and excel_b64 in payloads table
+2. Returns Excel data in /api/report/<client_id> endpoint
+
+DEPLOYMENT:
+1. Replace your app.py on Render with this version
+2. Add migration to update payloads table (see below)
+3. Redeploy
+"""
+
 import os
 import json
+import time
 from datetime import datetime, timedelta, timezone
-from io import BytesIO
 
-from flask import Flask, request, jsonify, abort, render_template, send_file
+from flask import Flask, request, jsonify, abort, render_template
 import psycopg2
 import psycopg2.extras
 from psycopg2.pool import SimpleConnectionPool
-
-# ==========================================================
-# Render Flask app (PostgreSQL persistent) ✅
-#
-# Endpoints:
-#   GET  /health
-#   POST /push-data            (X-API-KEY required)
-#   POST /push-excel           (X-API-KEY required, multipart)
-#   GET  /report/<client_id>   (serves your UI template)
-#   GET  /api/report/<client_id> (UI fetches JSON here)
-#   GET  /download/<client_id> (downloads latest Excel)
-#
-# Persists last JSON + Excel in PostgreSQL so sleep/restarts don't lose data.
-# ==========================================================
 
 app = Flask(__name__)
 
 # ---- Required env vars on Render ----
 API_KEY = os.getenv("API_KEY", "").strip()
-DATABASE_URL = os.getenv("DATABASE_URL", "").strip()  # Render provides this for Postgres
+DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 
-# ---- Trial settings (tweak on Render dashboard) ----
-TRIAL_DAYS = int(os.getenv("TRIAL_DAYS", "3"))                 # total trial lifetime from first push
-MAX_VIEWS = int(os.getenv("MAX_VIEWS", "3"))                   # number of 24h windows allowed
-HTML_VALID_HOURS = int(os.getenv("HTML_VALID_HOURS", "24"))    # length of each window
+# ---- Trial settings ----
+TRIAL_DAYS = int(os.getenv("TRIAL_DAYS", "3"))
+MAX_VIEWS = int(os.getenv("MAX_VIEWS", "3"))
+HTML_VALID_HOURS = int(os.getenv("HTML_VALID_HOURS", "24"))
 
 # ---- Connection pool ----
 POOL_MIN = int(os.getenv("PG_POOL_MIN", "1"))
@@ -66,7 +65,7 @@ def get_pool() -> SimpleConnectionPool:
     global _pool
     if _pool is None:
         if not DATABASE_URL:
-            raise RuntimeError("DATABASE_URL not configured (Render Postgres not attached?)")
+            raise RuntimeError("DATABASE_URL not configured")
         _pool = SimpleConnectionPool(
             POOL_MIN,
             POOL_MAX,
@@ -87,12 +86,11 @@ def db_putconn(conn):
 
 
 def init_db():
-    """Create tables if they don't exist (idempotent)."""
+    """Create tables if they don't exist"""
     conn = None
     try:
         conn = db_conn()
         with conn.cursor() as cur:
-            # Clients + trials/windows
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS clients (
                     client_id TEXT PRIMARY KEY,
@@ -101,26 +99,35 @@ def init_db():
                     window_expires_at TIMESTAMPTZ
                 );
             """)
-
-            # Last payload JSON
+            
+            # Updated payloads table with Excel support
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS payloads (
                     client_id TEXT PRIMARY KEY,
                     payload_json JSONB NOT NULL,
-                    updated_at TIMESTAMPTZ NOT NULL
+                    updated_at TIMESTAMPTZ NOT NULL,
+                    excel_filename TEXT,
+                    excel_b64 TEXT
                 );
             """)
-
-            # Latest Excel file per client
+            
+            # Add columns if they don't exist (migration)
             cur.execute("""
-                CREATE TABLE IF NOT EXISTS excel_files (
-                    client_id TEXT PRIMARY KEY,
-                    filename TEXT NOT NULL,
-                    content_type TEXT NOT NULL,
-                    bytes BYTEA NOT NULL,
-                    updated_at TIMESTAMPTZ NOT NULL
-                );
+                DO $$ 
+                BEGIN
+                    BEGIN
+                        ALTER TABLE payloads ADD COLUMN excel_filename TEXT;
+                    EXCEPTION
+                        WHEN duplicate_column THEN NULL;
+                    END;
+                    BEGIN
+                        ALTER TABLE payloads ADD COLUMN excel_b64 TEXT;
+                    EXCEPTION
+                        WHEN duplicate_column THEN NULL;
+                    END;
+                END $$;
             """)
+            
         conn.commit()
     finally:
         if conn is not None:
@@ -132,18 +139,13 @@ def _ensure_db_ready():
     init_db()
 
 
-# -------------------- Trial / window logic --------------------
+# -------------------- Trial logic --------------------
 def trial_is_active(trial_start: datetime) -> bool:
     return utc_now() <= (trial_start + timedelta(days=TRIAL_DAYS))
 
 
 def ensure_access_window(client_id: str) -> tuple[bool, str, dict | None]:
-    """
-    Ensures a valid 24h access window exists for this client.
-    - If trial ended => deny
-    - If window missing/expired => consume a view and open a new window (if views remain)
-    Returns (allowed, message, updated_client_row)
-    """
+    """Ensures a valid 24h access window exists"""
     conn = None
     try:
         conn = db_conn()
@@ -164,7 +166,6 @@ def ensure_access_window(client_id: str) -> tuple[bool, str, dict | None]:
             if isinstance(window_exp, str):
                 window_exp = parse_iso(window_exp)
 
-            # If no window or expired -> consume a view and open new window
             if (window_exp is None) or (now > window_exp):
                 if row["views_used"] >= MAX_VIEWS:
                     return False, "Trial limit reached", row
@@ -194,18 +195,6 @@ def require_active_window_or_403(client_id: str):
     return row
 
 
-def has_excel_for_client(client_id: str) -> bool:
-    conn = None
-    try:
-        conn = db_conn()
-        with conn.cursor() as cur:
-            cur.execute("SELECT 1 FROM excel_files WHERE client_id=%s", (client_id,))
-            return cur.fetchone() is not None
-    finally:
-        if conn is not None:
-            db_putconn(conn)
-
-
 # -------------------- Routes --------------------
 @app.get("/health")
 def health():
@@ -224,25 +213,24 @@ def home():
         "endpoints": {
             "health": "/health",
             "push_data": "POST /push-data (X-API-KEY required)",
-            "push_excel": "POST /push-excel (X-API-KEY required, multipart)",
             "report_page": "/report/<client_id>",
             "report_api": "/api/report/<client_id>",
-            "download_excel": "/download/<client_id>",
         }
     }
 
 
-@app.post("/push-data")
+@app.route("/push-data", methods=["POST"])
 def push_data():
     """
-    Local script uploads the computed dashboard JSON here.
-    Header: X-API-KEY: <API_KEY>
-
+    Upload dashboard JSON + optional Excel file (base64)
+    
     Expected payload:
     {
       "client_id": "RELAISMEDICAL",
       "year": 2025,
-      "data": { ... }
+      "data": { ... },
+      "excel_filename": "ESG_Report.xlsx",  // optional
+      "excel_b64": "base64..."              // optional
     }
     """
     require_api_key()
@@ -255,6 +243,10 @@ def push_data():
     data = payload.get("data", None)
     if not isinstance(data, dict):
         return jsonify({"ok": False, "error": "data must be an object/dict"}), 400
+
+    # Optional Excel data
+    excel_filename = payload.get("excel_filename")
+    excel_b64 = payload.get("excel_b64")
 
     now = utc_now()
 
@@ -271,13 +263,17 @@ def push_data():
                     VALUES (%s, %s, 0, NULL);
                 """, (client_id, now))
 
-            # Upsert payload
+            # Upsert payload with Excel data
             cur.execute("""
-                INSERT INTO payloads (client_id, payload_json, updated_at)
-                VALUES (%s, %s::jsonb, %s)
+                INSERT INTO payloads (client_id, payload_json, updated_at, excel_filename, excel_b64)
+                VALUES (%s, %s::jsonb, %s, %s, %s)
                 ON CONFLICT (client_id)
-                DO UPDATE SET payload_json = EXCLUDED.payload_json, updated_at = EXCLUDED.updated_at;
-            """, (client_id, json.dumps(payload, ensure_ascii=False), now))
+                DO UPDATE SET 
+                    payload_json = EXCLUDED.payload_json, 
+                    updated_at = EXCLUDED.updated_at,
+                    excel_filename = EXCLUDED.excel_filename,
+                    excel_b64 = EXCLUDED.excel_b64;
+            """, (client_id, json.dumps(payload, ensure_ascii=False), now, excel_filename, excel_b64))
 
         conn.commit()
     finally:
@@ -287,132 +283,13 @@ def push_data():
     return jsonify({"ok": True, "public_path": f"/report/{client_id}"})
 
 
-@app.post("/push-excel")
-def push_excel():
-    """
-    Upload latest Excel for a client (multipart).
-    Header: X-API-KEY required
-
-    Form-data:
-      client_id: RELAISMEDICAL
-      year: 2025 (optional)
-      excel: file (.xlsx)
-    """
-    require_api_key()
-
-    client_id = (request.form.get("client_id") or "").strip()
-    if not client_id:
-        return jsonify({"ok": False, "error": "client_id is required"}), 400
-
-    f = request.files.get("excel")
-    if f is None:
-        return jsonify({"ok": False, "error": "excel file is required (field name: excel)"}), 400
-
-    # Read file bytes
-    file_bytes = f.read()
-    filename = f.filename or f"ESG_{client_id}.xlsx"
-    content_type = f.mimetype or "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    now = utc_now()
-
-    conn = None
-    try:
-        conn = db_conn()
-        with conn.cursor() as cur:
-            # Ensure client exists (so trial logic applies)
-            cur.execute("SELECT client_id FROM clients WHERE client_id=%s", (client_id,))
-            exists = cur.fetchone() is not None
-            if not exists:
-                cur.execute("""
-                    INSERT INTO clients (client_id, trial_start, views_used, window_expires_at)
-                    VALUES (%s, %s, 0, NULL);
-                """, (client_id, now))
-
-            # Upsert latest excel
-            cur.execute("""
-                INSERT INTO excel_files (client_id, filename, content_type, bytes, updated_at)
-                VALUES (%s, %s, %s, %s, %s)
-                ON CONFLICT (client_id)
-                DO UPDATE SET filename=EXCLUDED.filename,
-                              content_type=EXCLUDED.content_type,
-                              bytes=EXCLUDED.bytes,
-                              updated_at=EXCLUDED.updated_at;
-            """, (client_id, filename, content_type, psycopg2.Binary(file_bytes), now))
-
-        conn.commit()
-    finally:
-        if conn is not None:
-            db_putconn(conn)
-
-    return jsonify({"ok": True, "download_url": f"/download/{client_id}"})
-
-
-@app.get("/download/<client_id>")
-def download_excel(client_id: str):
-    """
-    Download latest Excel for a client.
-    Must be within active access window (same policy as JSON).
-    """
-    client_id = client_id.strip()
-
-    # Enforce access window
-    # (Do NOT consume extra views here; /report manages consumption)
-    conn = None
-    try:
-        conn = db_conn()
-        with conn.cursor() as cur:
-            cur.execute("SELECT * FROM clients WHERE client_id=%s", (client_id,))
-            client = cur.fetchone()
-            if not client:
-                abort(404)
-
-            trial_start = client["trial_start"]
-            if isinstance(trial_start, str):
-                trial_start = parse_iso(trial_start)
-            if not trial_start or not trial_is_active(trial_start):
-                abort(403, description="Trial ended")
-
-            window_exp = client.get("window_expires_at")
-            if isinstance(window_exp, str):
-                window_exp = parse_iso(window_exp)
-
-            if (window_exp is None) or (utc_now() > window_exp):
-                abort(403, description="Access window expired")
-
-            cur.execute("SELECT filename, content_type, bytes FROM excel_files WHERE client_id=%s", (client_id,))
-            row = cur.fetchone()
-            if not row:
-                abort(404, description="Excel not available")
-
-            filename = row["filename"]
-            content_type = row["content_type"]
-            blob = row["bytes"]
-
-    finally:
-        if conn is not None:
-            db_putconn(conn)
-
-    bio = BytesIO(blob)
-    bio.seek(0)
-
-    return send_file(
-        bio,
-        as_attachment=True,
-        download_name=filename,
-        mimetype=content_type
-    )
-
-
 @app.get("/report/<client_id>")
 def report_page(client_id: str):
-    """
-    Serves your exact UI from templates/report.html
-    The UI fetches data from /api/report/<client_id>.
-    """
+    """Serves report.html template"""
     client_id = client_id.strip()
 
     # Must have payload stored
     conn = None
-    prow = None
     try:
         conn = db_conn()
         with conn.cursor() as cur:
@@ -424,10 +301,9 @@ def report_page(client_id: str):
         if conn is not None:
             db_putconn(conn)
 
-    # Enforce window/view logic (this consumes a view when needed)
+    # Enforce window/view logic
     row = require_active_window_or_403(client_id)
 
-    # Read year from payload
     year = None
     try:
         payload = prow["payload_json"]
@@ -450,9 +326,8 @@ def report_page(client_id: str):
 @app.get("/api/report/<client_id>")
 def report_api(client_id: str):
     """
-    UI loads JSON from here.
-    IMPORTANT: We require the client to be within the active 24h window.
-    (We do NOT consume additional views here; views are managed by /report.)
+    Returns JSON data for report.html
+    Includes Excel download data if available
     """
     client_id = client_id.strip()
 
@@ -460,6 +335,7 @@ def report_api(client_id: str):
     try:
         conn = db_conn()
         with conn.cursor() as cur:
+            # Verify client
             cur.execute("SELECT * FROM clients WHERE client_id=%s", (client_id,))
             client = cur.fetchone()
             if not client:
@@ -478,17 +354,20 @@ def report_api(client_id: str):
             if (window_exp is None) or (utc_now() > window_exp):
                 abort(403, description="Access window expired")
 
-            cur.execute("SELECT payload_json, updated_at FROM payloads WHERE client_id=%s", (client_id,))
+            # Get payload with Excel data
+            cur.execute("""
+                SELECT payload_json, updated_at, excel_filename, excel_b64 
+                FROM payloads 
+                WHERE client_id=%s
+            """, (client_id,))
             row = cur.fetchone()
             if not row:
                 abort(404)
 
             payload = row["payload_json"]
             updated_at = row["updated_at"]
-
-            # Check excel existence (fast single-row check)
-            cur.execute("SELECT 1 FROM excel_files WHERE client_id=%s", (client_id,))
-            excel_exists = cur.fetchone() is not None
+            excel_filename = row.get("excel_filename")
+            excel_b64 = row.get("excel_b64")
 
     finally:
         if conn is not None:
@@ -510,7 +389,7 @@ def report_api(client_id: str):
     data = payload.get("data", {})
     year = payload.get("year", "")
 
-    return jsonify({
+    response = {
         "client": client_id,
         "year": year,
         "updated_at": updated_str,
@@ -519,9 +398,15 @@ def report_api(client_id: str):
             "views_used": client.get("views_used", 0),
             "views_max": MAX_VIEWS
         },
-        "excel_url": (f"/download/{client_id}" if excel_exists else None),
         "data": data
-    })
+    }
+
+    # Add Excel data if available
+    if excel_filename and excel_b64:
+        response["excel_filename"] = excel_filename
+        response["excel_b64"] = excel_b64
+
+    return jsonify(response)
 
 
 # ---- local dev only ----
