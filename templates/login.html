@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Login - {{ client_id }}</title>
+
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600;700;800;900&family=Cormorant+Garamond:wght@300;400;500;600;700&family=Montserrat:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'Montserrat', sans-serif;
+      background: #0a0a0a;
+      background-image:
+        radial-gradient(circle at 20% 50%, rgba(212, 175, 55, 0.03) 0%, transparent 50%),
+        radial-gradient(circle at 80% 80%, rgba(212, 175, 55, 0.02) 0%, transparent 50%);
+      color: #e8e8e8;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    .login-container {
+      max-width: 500px;
+      width: 100%;
+      background: linear-gradient(135deg, #1a1a1a 0%, #0d0d0d 100%);
+      padding: 60px 50px;
+      border-radius: 4px;
+      border-top: 3px solid #d4af37;
+      border-bottom: 1px solid rgba(212, 175, 55, 0.2);
+      box-shadow: 0 20px 80px rgba(0, 0, 0, 0.7),
+                  0 0 60px rgba(212, 175, 55, 0.15);
+      position: relative;
+      animation: fadeIn 0.8s ease;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(30px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .login-container::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 1px;
+      background: linear-gradient(90deg,
+        transparent,
+        rgba(212, 175, 55, 0.5) 50%,
+        transparent);
+    }
+
+    .lock-icon {
+      width: 80px;
+      height: 80px;
+      margin: 0 auto 30px;
+      border: 3px solid rgba(212, 175, 55, 0.3);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #d4af37;
+      font-size: 40px;
+    }
+
+    h1 {
+      font-family: 'Playfair Display', serif;
+      font-size: 32px;
+      font-weight: 700;
+      color: #d4af37;
+      text-align: center;
+      margin-bottom: 10px;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+
+    .client-id {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 20px;
+      color: #f4e5c3;
+      text-align: center;
+      margin-bottom: 40px;
+      font-weight: 600;
+    }
+
+    .form-group {
+      margin-bottom: 30px;
+    }
+
+    label {
+      font-family: 'Cormorant Garamond', serif;
+      display: block;
+      font-size: 14px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      color: #d4af37;
+      margin-bottom: 12px;
+    }
+
+    input[type="password"] {
+      width: 100%;
+      padding: 18px 24px;
+      background: #0d0d0d;
+      border: 1px solid rgba(212, 175, 55, 0.3);
+      border-radius: 4px;
+      font-size: 16px;
+      color: #e8e8e8;
+      font-family: 'Montserrat', sans-serif;
+      transition: all 0.3s;
+    }
+
+    input[type="password"]::placeholder {
+      color: rgba(212, 175, 55, 0.4);
+    }
+
+    input[type="password"]:focus {
+      outline: none;
+      border-color: #d4af37;
+      background: #000;
+      box-shadow: 0 0 20px rgba(212, 175, 55, 0.15);
+    }
+
+    button {
+      width: 100%;
+      padding: 18px;
+      background: linear-gradient(135deg, #d4af37 0%, #c49a2e 100%);
+      border: none;
+      border-radius: 4px;
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 16px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      color: #0a0a0a;
+      cursor: pointer;
+      transition: all 0.3s;
+      box-shadow: 0 4px 15px rgba(212, 175, 55, 0.3);
+    }
+
+    button:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 25px rgba(212, 175, 55, 0.5);
+    }
+
+    button:active {
+      transform: translateY(0);
+    }
+
+    .error {
+      background: rgba(245, 87, 108, 0.1);
+      border: 1px solid rgba(245, 87, 108, 0.3);
+      padding: 15px 20px;
+      border-radius: 4px;
+      margin-bottom: 25px;
+      font-size: 14px;
+      color: rgba(245, 87, 108, 0.95);
+      text-align: center;
+      animation: shake 0.5s;
+    }
+
+    @keyframes shake {
+      0%, 100% { transform: translateX(0); }
+      10%, 30%, 50%, 70%, 90% { transform: translateX(-5px); }
+      20%, 40%, 60%, 80% { transform: translateX(5px); }
+    }
+
+    .footer {
+      margin-top: 30px;
+      text-align: center;
+      font-size: 12px;
+      color: rgba(212, 175, 55, 0.5);
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+
+    @media (max-width: 600px) {
+      .login-container {
+        padding: 40px 30px;
+      }
+      h1 {
+        font-size: 24px;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="login-container">
+    <div class="lock-icon">🔒</div>
+    
+    <h1>Secure Access</h1>
+    <div class="client-id">{{ client_id }}</div>
+
+    {% if error %}
+    <div class="error">
+      {{ error }}
+    </div>
+    {% endif %}
+
+    <form method="POST" action="/report/{{ client_id }}/login">
+      <div class="form-group">
+        <label for="password">Mot de Passe</label>
+        <input 
+          type="password" 
+          id="password" 
+          name="password" 
+          placeholder="Entrez votre mot de passe"
+          required
+          autofocus
+        />
+      </div>
+
+      <button type="submit">Accéder au Dashboard</button>
+    </form>
+
+    <div class="footer">
+      Protected by Sage Reporting
+    </div>
+  </div>
+</body>
+</html>

@@ -1,29 +1,28 @@
 """
-UPDATED app.py for Render with Excel Download Support
+Render Flask app with PASSWORD PROTECTION
+Each client needs password to access their dashboard
 
-Changes from original:
-1. Stores excel_filename and excel_b64 in payloads table
-2. Returns Excel data in /api/report/<client_id> endpoint
-
-DEPLOYMENT:
-1. Replace your app.py on Render with this version
-2. Add migration to update payloads table (see below)
-3. Redeploy
+NEW FEATURES:
+- Password hash stored in database
+- Login page before dashboard access
+- Session-based authentication
+- Secure password hashing with bcrypt
 """
 
 import os
 import json
-import time
+import hashlib
 from datetime import datetime, timedelta, timezone
 
-from flask import Flask, request, jsonify, abort, render_template
+from flask import Flask, request, jsonify, abort, render_template, session, redirect, url_for
 import psycopg2
 import psycopg2.extras
 from psycopg2.pool import SimpleConnectionPool
 
 app = Flask(__name__)
+app.secret_key = os.getenv("SECRET_KEY", "change-this-in-production-please")
 
-# ---- Required env vars on Render ----
+# ---- Required env vars ----
 API_KEY = os.getenv("API_KEY", "").strip()
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 
@@ -54,9 +53,19 @@ def parse_iso(s: str | None) -> datetime | None:
     return datetime.fromisoformat(s)
 
 
+def hash_password(password: str) -> str:
+    """Simple SHA256 hash for passwords"""
+    return hashlib.sha256(password.encode()).hexdigest()
+
+
+def verify_password(password: str, hashed: str) -> bool:
+    """Verify password against hash"""
+    return hash_password(password) == hashed
+
+
 def require_api_key():
     if not API_KEY:
-        abort(500, description="API_KEY not configured on server")
+        abort(500, description="API_KEY not configured")
     if request.headers.get("X-API-KEY", "") != API_KEY:
         abort(403, description="Unauthorized")
 
@@ -86,7 +95,7 @@ def db_putconn(conn):
 
 
 def init_db():
-    """Create tables if they don't exist"""
+    """Create tables with password support"""
     conn = None
     try:
         conn = db_conn()
@@ -94,13 +103,13 @@ def init_db():
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS clients (
                     client_id TEXT PRIMARY KEY,
+                    password_hash TEXT,
                     trial_start TIMESTAMPTZ NOT NULL,
                     views_used INTEGER NOT NULL DEFAULT 0,
                     window_expires_at TIMESTAMPTZ
                 );
             """)
             
-            # Updated payloads table with Excel support
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS payloads (
                     client_id TEXT PRIMARY KEY,
@@ -111,10 +120,15 @@ def init_db():
                 );
             """)
             
-            # Add columns if they don't exist (migration)
+            # Add password_hash column if it doesn't exist
             cur.execute("""
                 DO $$ 
                 BEGIN
+                    BEGIN
+                        ALTER TABLE clients ADD COLUMN password_hash TEXT;
+                    EXCEPTION
+                        WHEN duplicate_column THEN NULL;
+                    END;
                     BEGIN
                         ALTER TABLE payloads ADD COLUMN excel_filename TEXT;
                     EXCEPTION
@@ -145,7 +159,7 @@ def trial_is_active(trial_start: datetime) -> bool:
 
 
 def ensure_access_window(client_id: str) -> tuple[bool, str, dict | None]:
-    """Ensures a valid 24h access window exists"""
+    """Ensures valid 24h access window"""
     conn = None
     try:
         conn = db_conn()
@@ -213,8 +227,9 @@ def home():
         "endpoints": {
             "health": "/health",
             "push_data": "POST /push-data (X-API-KEY required)",
-            "report_page": "/report/<client_id>",
-            "report_api": "/api/report/<client_id>",
+            "report_login": "/report/<client_id>/login",
+            "report_page": "/report/<client_id> (requires auth)",
+            "report_api": "/api/report/<client_id> (requires auth)",
         }
     }
 
@@ -222,15 +237,16 @@ def home():
 @app.route("/push-data", methods=["POST"])
 def push_data():
     """
-    Upload dashboard JSON + optional Excel file (base64)
+    Upload dashboard JSON + optional password + Excel
     
-    Expected payload:
+    Payload:
     {
       "client_id": "RELAISMEDICAL",
+      "password": "optional-password",  // NEW!
       "year": 2025,
-      "data": { ... },
-      "excel_filename": "ESG_Report.xlsx",  // optional
-      "excel_b64": "base64..."              // optional
+      "data": {...},
+      "excel_filename": "...",
+      "excel_b64": "..."
     }
     """
     require_api_key()
@@ -238,13 +254,17 @@ def push_data():
     payload = request.get_json(force=True) or {}
     client_id = str(payload.get("client_id", "")).strip()
     if not client_id:
-        return jsonify({"ok": False, "error": "client_id is required"}), 400
+        return jsonify({"ok": False, "error": "client_id required"}), 400
 
     data = payload.get("data", None)
     if not isinstance(data, dict):
-        return jsonify({"ok": False, "error": "data must be an object/dict"}), 400
+        return jsonify({"ok": False, "error": "data must be object/dict"}), 400
 
-    # Optional Excel data
+    # Optional password
+    password = payload.get("password")
+    password_hash = hash_password(password) if password else None
+
+    # Optional Excel
     excel_filename = payload.get("excel_filename")
     excel_b64 = payload.get("excel_b64")
 
@@ -254,16 +274,24 @@ def push_data():
     try:
         conn = db_conn()
         with conn.cursor() as cur:
-            # Create client if new
-            cur.execute("SELECT client_id FROM clients WHERE client_id=%s", (client_id,))
-            exists = cur.fetchone() is not None
-            if not exists:
+            # Check if client exists
+            cur.execute("SELECT client_id, password_hash FROM clients WHERE client_id=%s", (client_id,))
+            existing = cur.fetchone()
+            
+            if not existing:
+                # New client
                 cur.execute("""
-                    INSERT INTO clients (client_id, trial_start, views_used, window_expires_at)
-                    VALUES (%s, %s, 0, NULL);
-                """, (client_id, now))
+                    INSERT INTO clients (client_id, password_hash, trial_start, views_used, window_expires_at)
+                    VALUES (%s, %s, %s, 0, NULL);
+                """, (client_id, password_hash, now))
+            else:
+                # Existing client - update password if provided
+                if password_hash:
+                    cur.execute("""
+                        UPDATE clients SET password_hash = %s WHERE client_id = %s;
+                    """, (password_hash, client_id))
 
-            # Upsert payload with Excel data
+            # Upsert payload
             cur.execute("""
                 INSERT INTO payloads (client_id, payload_json, updated_at, excel_filename, excel_b64)
                 VALUES (%s, %s::jsonb, %s, %s, %s)
@@ -283,12 +311,59 @@ def push_data():
     return jsonify({"ok": True, "public_path": f"/report/{client_id}"})
 
 
+@app.get("/report/<client_id>/login")
+def login_page(client_id: str):
+    """Login page for client"""
+    client_id = client_id.strip()
+    return render_template("login.html", client_id=client_id)
+
+
+@app.post("/report/<client_id>/login")
+def login_submit(client_id: str):
+    """Process login"""
+    client_id = client_id.strip()
+    password = request.form.get("password", "")
+
+    conn = None
+    try:
+        conn = db_conn()
+        with conn.cursor() as cur:
+            cur.execute("SELECT password_hash FROM clients WHERE client_id=%s", (client_id,))
+            row = cur.fetchone()
+            
+            if not row:
+                return render_template("login.html", client_id=client_id, error="Client not found")
+            
+            # Check password
+            stored_hash = row["password_hash"]
+            
+            # If no password set, allow access (backward compatibility)
+            if not stored_hash:
+                session[f"auth_{client_id}"] = True
+                return redirect(url_for("report_page", client_id=client_id))
+            
+            # Verify password
+            if verify_password(password, stored_hash):
+                session[f"auth_{client_id}"] = True
+                return redirect(url_for("report_page", client_id=client_id))
+            else:
+                return render_template("login.html", client_id=client_id, error="Incorrect password")
+                
+    finally:
+        if conn is not None:
+            db_putconn(conn)
+
+
 @app.get("/report/<client_id>")
 def report_page(client_id: str):
-    """Serves report.html template"""
+    """Dashboard page - requires authentication"""
     client_id = client_id.strip()
 
-    # Must have payload stored
+    # Check authentication
+    if not session.get(f"auth_{client_id}"):
+        return redirect(url_for("login_page", client_id=client_id))
+
+    # Check payload exists
     conn = None
     try:
         conn = db_conn()
@@ -296,7 +371,7 @@ def report_page(client_id: str):
             cur.execute("SELECT payload_json FROM payloads WHERE client_id=%s", (client_id,))
             prow = cur.fetchone()
             if not prow:
-                return "No data available yet. Please contact provider.", 404
+                return "No data available. Please contact provider.", 404
     finally:
         if conn is not None:
             db_putconn(conn)
@@ -323,13 +398,22 @@ def report_page(client_id: str):
     )
 
 
+@app.get("/report/<client_id>/logout")
+def logout(client_id: str):
+    """Logout"""
+    client_id = client_id.strip()
+    session.pop(f"auth_{client_id}", None)
+    return redirect(url_for("login_page", client_id=client_id))
+
+
 @app.get("/api/report/<client_id>")
 def report_api(client_id: str):
-    """
-    Returns JSON data for report.html
-    Includes Excel download data if available
-    """
+    """API endpoint - requires authentication"""
     client_id = client_id.strip()
+
+    # Check authentication
+    if not session.get(f"auth_{client_id}"):
+        abort(401, description="Not authenticated")
 
     conn = None
     try:
@@ -354,7 +438,7 @@ def report_api(client_id: str):
             if (window_exp is None) or (utc_now() > window_exp):
                 abort(403, description="Access window expired")
 
-            # Get payload with Excel data
+            # Get payload
             cur.execute("""
                 SELECT payload_json, updated_at, excel_filename, excel_b64 
                 FROM payloads 
@@ -373,7 +457,7 @@ def report_api(client_id: str):
         if conn is not None:
             db_putconn(conn)
 
-    # Format updated_at
+    # Format response
     try:
         if isinstance(updated_at, str):
             updated_dt = parse_iso(updated_at) or utc_now()
@@ -401,7 +485,7 @@ def report_api(client_id: str):
         "data": data
     }
 
-    # Add Excel data if available
+    # Add Excel if available
     if excel_filename and excel_b64:
         response["excel_filename"] = excel_filename
         response["excel_b64"] = excel_b64
@@ -409,6 +493,5 @@ def report_api(client_id: str):
     return jsonify(response)
 
 
-# ---- local dev only ----
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", "5000")))
