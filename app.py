@@ -553,6 +553,7 @@ def report_api(client_id: str):
 
     data = payload.get("data", {})
     year = payload.get("year", "")
+    monthly_data = payload.get("monthly_data", {})  # 📊 NEW: Get monthly data from payload
 
     response = {
         "client": client_id,
@@ -563,7 +564,8 @@ def report_api(client_id: str):
             "views_used": client.get("views_used", 0),
             "views_max": MAX_VIEWS
         },
-        "data": data
+        "data": data,
+        "monthly_data": monthly_data  # 📊 NEW: Include in response
     }
 
     # Add Excel if available
