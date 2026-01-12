@@ -267,14 +267,26 @@
     periodA.innerHTML = '<option value="">Sélectionner...</option>';
     periodB.innerHTML = '<option value="">Sélectionner...</option>';
 
-    // Get all available periods
+    // Get all available periods from both years
+    const currentYear = monthlyData.current_year || {};
+    const previousYear = monthlyData.previous_year || {};
+    
     const allPeriods = [
-      ...Object.keys(monthlyData.current_year || {}),
-      ...Object.keys(monthlyData.previous_year || {})
-    ].sort().reverse();
+      ...Object.keys(currentYear),
+      ...Object.keys(previousYear)
+    ];
+    
+    // Remove duplicates and sort
+    const uniquePeriods = [...new Set(allPeriods)].sort().reverse();
+
+    if (uniquePeriods.length === 0) {
+      console.error('No monthly data available');
+      alert('Aucune donnée mensuelle disponible. Veuillez exécuter python esg_part8_main.py pour générer les données.');
+      return;
+    }
 
     // Populate options
-    allPeriods.forEach(period => {
+    uniquePeriods.forEach(period => {
       const [year, month] = period.split('-');
       const date = new Date(year, month - 1);
       const label = date.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
@@ -284,6 +296,8 @@
       periodA.add(optionA);
       periodB.add(optionB);
     });
+    
+    console.log(`✅ Loaded ${uniquePeriods.length} periods:`, uniquePeriods);
   }
 
   function comparePeriods() {
@@ -314,14 +328,21 @@
   }
 
   function getPeriodData(periodKey) {
-    const [year] = periodKey.split('-');
-    const currentYear = new Date().getFullYear();
+    const currentYear = monthlyData.current_year || {};
+    const previousYear = monthlyData.previous_year || {};
     
-    if (parseInt(year) === currentYear) {
-      return monthlyData.current_year?.[periodKey];
-    } else {
-      return monthlyData.previous_year?.[periodKey];
+    // Check if period exists in current year data
+    if (currentYear[periodKey]) {
+      return currentYear[periodKey];
     }
+    
+    // Check if period exists in previous year data
+    if (previousYear[periodKey]) {
+      return previousYear[periodKey];
+    }
+    
+    console.error(`Period ${periodKey} not found in data`);
+    return null;
   }
 
   function displayComparison(keyA, dataA, keyB, dataB) {

@@ -135,17 +135,31 @@
   }
 
   function extractMonthlyData(monthlyData) {
-    if (!monthlyData) return { labels: [], datasets: {} };
+    if (!monthlyData) {
+      console.error('No monthly data provided');
+      return { labels: [], datasets: {}, currentYear: {}, previousYear: {}, months: [] };
+    }
     
     const currentYear = monthlyData.current_year || {};
     const previousYear = monthlyData.previous_year || {};
     
-    // Get months
+    console.log('Current year data:', Object.keys(currentYear));
+    console.log('Previous year data:', Object.keys(previousYear));
+    
+    // Get months from current year
     const months = Object.keys(currentYear).sort();
+    
+    if (months.length === 0) {
+      console.error('No months found in current year data');
+      return { labels: [], datasets: {}, currentYear: {}, previousYear: {}, months: [] };
+    }
+    
     const labels = months.map(m => {
       const [year, month] = m.split('-');
       return new Date(year, month - 1).toLocaleDateString('fr-FR', { month: 'short' });
     });
+    
+    console.log(`✅ Extracted ${months.length} months:`, months);
     
     return { labels, currentYear, previousYear, months };
   }
@@ -409,7 +423,19 @@
   // Initialize charts
   document.addEventListener('DOMContentLoaded', async () => {
     try {
+      console.log('Fetching data for charts...');
       const data = await fetchData();
+      
+      console.log('Data received:', {
+        hasData: !!data.data,
+        hasMonthlyData: !!data.monthly_data,
+        monthlyDataKeys: data.monthly_data ? Object.keys(data.monthly_data) : []
+      });
+      
+      // Check if monthly data exists
+      if (!data.monthly_data || (!data.monthly_data.current_year && !data.monthly_data.previous_year)) {
+        throw new Error('Aucune donnée mensuelle trouvée. Veuillez exécuter python esg_part8_main.py pour générer les données mensuelles.');
+      }
       
       createRevenueChart(document.getElementById('revenueChart').getContext('2d'), data);
       createEBEChart(document.getElementById('ebeChart').getContext('2d'), data);
@@ -420,12 +446,19 @@
       
       document.getElementById('loadingCharts').style.display = 'none';
       document.getElementById('chartsContent').style.display = 'block';
+      
+      console.log('✅ All charts loaded successfully');
     } catch (error) {
       console.error('Error loading charts:', error);
       document.getElementById('loadingCharts').innerHTML = `
         <div style="color: rgba(245, 87, 108, 0.9);">
           <div style="font-size: 48px; margin-bottom: 20px;">⚠️</div>
-          <div>Erreur de chargement des graphiques</div>
+          <div style="font-family: 'Cormorant Garamond', serif; font-size: 20px; margin-bottom: 15px;">
+            Erreur de chargement des graphiques
+          </div>
+          <div style="font-size: 14px; color: rgba(232, 232, 232, 0.7); max-width: 600px; margin: 0 auto;">
+            ${error.message}
+          </div>
         </div>
       `;
     }
