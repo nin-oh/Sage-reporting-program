@@ -112,6 +112,9 @@
 {% block extra_scripts %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script>
+  // Version: 2.0 - Force cache refresh
+  console.log('📊 Charts.html v2.0 loaded');
+  
   const clientId = '{{ client_id }}';
   
   // Luxury chart colors
@@ -167,11 +170,32 @@
   function createRevenueChart(ctx, data) {
     const { labels, currentYear, previousYear, months } = extractMonthlyData(data.monthly_data);
     
-    const currentCA = months.map(m => currentYear[m]?.['Chiffre d\'Affaires'] || currentYear[m]?.['Ventes de marchandises'] || 0);
+    if (months.length === 0) {
+      console.error('No monthly data available for revenue chart');
+      return;
+    }
+    
+    // Try multiple field names for CA
+    const currentCA = months.map(m => {
+      const monthData = currentYear[m] || {};
+      return monthData['Chiffre d\'Affaires'] || 
+             monthData['Ventes de marchandises'] || 
+             monthData['CA'] || 
+             (monthData['Ventes de marchandises'] || 0) + (monthData['Ventes de biens et services'] || 0) || 
+             0;
+    });
+    
     const previousCA = months.map(m => {
       const prevMonth = m.replace(/^\d{4}/, String(parseInt(m.split('-')[0]) - 1));
-      return previousYear[prevMonth]?.['Chiffre d\'Affaires'] || previousYear[prevMonth]?.['Ventes de marchandises'] || 0;
+      const monthData = previousYear[prevMonth] || {};
+      return monthData['Chiffre d\'Affaires'] || 
+             monthData['Ventes de marchandises'] || 
+             monthData['CA'] ||
+             (monthData['Ventes de marchandises'] || 0) + (monthData['Ventes de biens et services'] || 0) || 
+             0;
     });
+    
+    console.log('Revenue data:', { currentCA: currentCA.slice(0, 3), previousCA: previousCA.slice(0, 3) });
 
     new Chart(ctx, {
       type: 'line',
@@ -225,7 +249,17 @@
   function createEBEChart(ctx, data) {
     const { labels, currentYear, months } = extractMonthlyData(data.monthly_data);
     
-    const ebeData = months.map(m => currentYear[m]?.['EBE'] || 0);
+    if (months.length === 0) {
+      console.error('No monthly data available for EBE chart');
+      return;
+    }
+    
+    const ebeData = months.map(m => {
+      const monthData = currentYear[m] || {};
+      return monthData['EBE'] || monthData['Excédent Brut d\'Exploitation'] || 0;
+    });
+    
+    console.log('EBE data:', ebeData.slice(0, 3));
 
     new Chart(ctx, {
       type: 'bar',

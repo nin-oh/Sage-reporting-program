@@ -463,6 +463,22 @@ def compare_page(client_id: str):
     )
 
 
+@app.get("/report/<client_id>/debug")
+def debug_page(client_id: str):
+    """Debug page - shows raw API data"""
+    client_id = client_id.strip()
+
+    # Check authentication
+    if not session.get(f"auth_{client_id}"):
+        return redirect(url_for("login_page", client_id=client_id))
+
+    return render_template(
+        "debug.html",
+        client_id=client_id,
+        page='debug'
+    )
+
+
 @app.get("/report/<client_id>/logout")
 def logout(client_id: str):
     """Logout"""

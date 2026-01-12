@@ -1,0 +1,162 @@
+{% extends "base.html" %}
+
+{% block title %}Debug - API Data{% endblock %}
+
+{% block extra_styles %}
+<style>
+  .debug-container {
+    background: linear-gradient(135deg, #1a1a1a 0%, #0d0d0d 100%);
+    padding: 40px;
+    border-radius: 4px;
+    border: 1px solid rgba(212, 175, 55, 0.2);
+    font-family: 'Courier New', monospace;
+    font-size: 13px;
+    color: #e8e8e8;
+    max-height: 80vh;
+    overflow-y: auto;
+  }
+  
+  .debug-title {
+    font-family: 'Playfair Display', serif;
+    font-size: 32px;
+    color: #d4af37;
+    margin-bottom: 30px;
+  }
+  
+  .debug-section {
+    margin-bottom: 30px;
+    padding: 20px;
+    background: rgba(0, 0, 0, 0.3);
+    border-left: 3px solid #d4af37;
+  }
+  
+  .debug-key {
+    color: #d4af37;
+    font-weight: bold;
+  }
+  
+  .debug-value {
+    color: #f4e5c3;
+  }
+  
+  pre {
+    background: #000;
+    padding: 15px;
+    border-radius: 4px;
+    overflow-x: auto;
+    color: #4caf50;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1 class="debug-title">🔍 API Debug - Raw Data</h1>
+
+<div class="debug-container">
+  <div class="debug-section">
+    <div class="debug-key">Endpoint:</div>
+    <div class="debug-value" id="endpoint">Loading...</div>
+  </div>
+
+  <div class="debug-section">
+    <div class="debug-key">Response Status:</div>
+    <div class="debug-value" id="status">Loading...</div>
+  </div>
+
+  <div class="debug-section">
+    <div class="debug-key">Top-Level Keys:</div>
+    <div class="debug-value" id="keys">Loading...</div>
+  </div>
+
+  <div class="debug-section">
+    <div class="debug-key">Monthly Data Structure:</div>
+    <div class="debug-value" id="monthlyStructure">Loading...</div>
+  </div>
+
+  <div class="debug-section">
+    <div class="debug-key">Sample Month Data:</div>
+    <pre id="sampleData">Loading...</pre>
+  </div>
+
+  <div class="debug-section">
+    <div class="debug-key">Full Raw Response:</div>
+    <pre id="rawData">Loading...</pre>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+  const clientId = '{{ client_id }}';
+  const endpoint = `/api/report/${clientId}`;
+  
+  document.getElementById('endpoint').textContent = endpoint;
+  
+  async function loadDebugData() {
+    try {
+      const response = await fetch(endpoint);
+      
+      document.getElementById('status').textContent = `${response.status} ${response.statusText}`;
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      
+      const data = await response.json();
+      
+      // Top-level keys
+      const keys = Object.keys(data);
+      document.getElementById('keys').innerHTML = keys.map(k => 
+        `<div style="padding: 5px;">✅ ${k}</div>`
+      ).join('');
+      
+      // Monthly data structure
+      if (data.monthly_data) {
+        const monthly = data.monthly_data;
+        let structure = '';
+        
+        if (monthly.current_year) {
+          const months = Object.keys(monthly.current_year);
+          structure += `<div style="color: #4caf50;">✅ current_year: ${months.length} months</div>`;
+          structure += `<div style="padding-left: 20px; color: #f4e5c3;">${months.join(', ')}</div>`;
+        } else {
+          structure += `<div style="color: #f44336;">❌ current_year: MISSING</div>`;
+        }
+        
+        if (monthly.previous_year) {
+          const months = Object.keys(monthly.previous_year);
+          structure += `<div style="color: #4caf50;">✅ previous_year: ${months.length} months</div>`;
+          structure += `<div style="padding-left: 20px; color: #f4e5c3;">${months.slice(0, 3).join(', ')}...</div>`;
+        } else {
+          structure += `<div style="color: #f44336;">❌ previous_year: MISSING</div>`;
+        }
+        
+        document.getElementById('monthlyStructure').innerHTML = structure;
+        
+        // Sample data
+        if (monthly.current_year) {
+          const firstMonth = Object.keys(monthly.current_year)[0];
+          const sampleData = monthly.current_year[firstMonth];
+          document.getElementById('sampleData').textContent = 
+            `Month: ${firstMonth}\n\n` + 
+            JSON.stringify(sampleData, null, 2);
+        }
+      } else {
+        document.getElementById('monthlyStructure').innerHTML = 
+          '<div style="color: #f44336;">❌ monthly_data: MISSING</div>';
+        document.getElementById('sampleData').textContent = 'No monthly data available';
+      }
+      
+      // Full raw data
+      document.getElementById('rawData').textContent = JSON.stringify(data, null, 2);
+      
+    } catch (error) {
+      document.getElementById('status').innerHTML = 
+        `<span style="color: #f44336;">❌ ${error.message}</span>`;
+      console.error('Debug error:', error);
+    }
+  }
+  
+  document.addEventListener('DOMContentLoaded', loadDebugData);
+</script>
+{% endblock %}
