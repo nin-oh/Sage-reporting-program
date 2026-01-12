@@ -1,0 +1,413 @@
+{% extends "base.html" %}
+
+{% block title %}Comparaison - Executive Dashboard{% endblock %}
+
+{% block extra_styles %}
+<style>
+  .compare-header {
+    background: linear-gradient(135deg, #1a1a1a 0%, #0d0d0d 100%);
+    padding: 40px;
+    border-radius: 4px;
+    border: 1px solid rgba(212, 175, 55, 0.2);
+    margin-bottom: 40px;
+  }
+
+  .selector-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 30px;
+    margin-bottom: 30px;
+  }
+
+  .selector-group {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .selector-label {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 14px;
+    font-weight: 700;
+    color: #d4af37;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+  }
+
+  select {
+    padding: 15px 20px;
+    background: #0d0d0d;
+    border: 1px solid rgba(212, 175, 55, 0.3);
+    border-radius: 4px;
+    color: #e8e8e8;
+    font-family: 'Montserrat', sans-serif;
+    font-size: 15px;
+    cursor: pointer;
+    transition: all 0.3s;
+  }
+
+  select:hover {
+    border-color: #d4af37;
+  }
+
+  select:focus {
+    outline: none;
+    border-color: #d4af37;
+    box-shadow: 0 0 20px rgba(212, 175, 55, 0.1);
+  }
+
+  .compare-btn {
+    padding: 18px 50px;
+    background: linear-gradient(135deg, #d4af37 0%, #c49a2e 100%);
+    border: none;
+    border-radius: 4px;
+    color: #0a0a0a;
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 18px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    cursor: pointer;
+    transition: all 0.3s;
+    box-shadow: 0 4px 20px rgba(212, 175, 55, 0.3);
+  }
+
+  .compare-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 30px rgba(212, 175, 55, 0.5);
+  }
+
+  .compare-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .results-section {
+    display: none;
+  }
+
+  .results-summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 30px;
+    margin-bottom: 40px;
+  }
+
+  .summary-card {
+    background: linear-gradient(135deg, #1a1a1a 0%, #0d0d0d 100%);
+    padding: 30px;
+    border-radius: 4px;
+    border: 1px solid rgba(212, 175, 55, 0.2);
+  }
+
+  .summary-title {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 14px;
+    color: #d4af37;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    margin-bottom: 15px;
+  }
+
+  .summary-value {
+    font-size: 36px;
+    font-weight: 800;
+    color: #f4e5c3;
+    margin-bottom: 8px;
+  }
+
+  .summary-unit {
+    font-size: 12px;
+    color: rgba(212, 175, 55, 0.6);
+    text-transform: uppercase;
+  }
+
+  .comparison-table {
+    background: linear-gradient(135deg, #1a1a1a 0%, #0d0d0d 100%);
+    border-radius: 4px;
+    border: 1px solid rgba(212, 175, 55, 0.2);
+    overflow-x: auto;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  thead tr {
+    border-bottom: 2px solid rgba(212, 175, 55, 0.3);
+  }
+
+  th {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 14px;
+    font-weight: 700;
+    color: #d4af37;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    padding: 25px 20px;
+    text-align: left;
+  }
+
+  td {
+    padding: 20px;
+    border-bottom: 1px solid rgba(212, 175, 55, 0.1);
+    color: rgba(244, 229, 195, 0.9);
+  }
+
+  tbody tr:hover {
+    background: rgba(212, 175, 55, 0.05);
+  }
+
+  .variance-positive {
+    color: #4caf50;
+    font-weight: 700;
+  }
+
+  .variance-negative {
+    color: #f44336;
+    font-weight: 700;
+  }
+
+  .variance-neutral {
+    color: rgba(232, 232, 232, 0.6);
+  }
+
+  @media (max-width: 768px) {
+    .selector-grid {
+      grid-template-columns: 1fr;
+    }
+    
+    table {
+      font-size: 14px;
+    }
+    
+    th, td {
+      padding: 15px 10px;
+    }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="compare-header">
+  <h1 style="font-family: 'Playfair Display', serif; font-size: 32px; color: #d4af37; margin-bottom: 30px; text-transform: uppercase; letter-spacing: 2px;">
+    🔄 Comparaison Mensuelle
+  </h1>
+
+  <div class="selector-grid">
+    <div class="selector-group">
+      <label class="selector-label">Période A</label>
+      <select id="periodA">
+        <option value="">Sélectionner...</option>
+      </select>
+    </div>
+
+    <div class="selector-group">
+      <label class="selector-label">Période B</label>
+      <select id="periodB">
+        <option value="">Sélectionner...</option>
+      </select>
+    </div>
+
+    <div class="selector-group" style="display: flex; align-items: flex-end;">
+      <button class="compare-btn" id="compareBtn" onclick="comparePerio ds()">
+        Comparer
+      </button>
+    </div>
+  </div>
+</div>
+
+<div class="results-section" id="resultsSection">
+  <!-- Summary Cards -->
+  <div class="results-summary" id="summaryCards"></div>
+
+  <!-- Comparison Table -->
+  <div class="comparison-table">
+    <table>
+      <thead>
+        <tr>
+          <th>Indicateur</th>
+          <th>Période A</th>
+          <th>Période B</th>
+          <th>Variance</th>
+          <th>Variance %</th>
+        </tr>
+      </thead>
+      <tbody id="comparisonBody"></tbody>
+    </table>
+  </div>
+</div>
+
+<div id="noData" style="display: none; text-align: center; padding: 100px 20px; color: rgba(212, 175, 55, 0.5);">
+  <div style="font-size: 64px; margin-bottom: 20px;">📊</div>
+  <div style="font-family: 'Cormorant Garamond', serif; font-size: 20px;">
+    Sélectionnez deux périodes pour comparer
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+  const clientId = '{{ client_id }}';
+  let monthlyData = null;
+
+  async function fetchData() {
+    const res = await fetch(`/api/report/${encodeURIComponent(clientId)}`);
+    if (!res.ok) throw new Error('Failed to fetch');
+    return await res.json();
+  }
+
+  function populateSelectors(data) {
+    monthlyData = data.monthly_data || {};
+    const periodA = document.getElementById('periodA');
+    const periodB = document.getElementById('periodB');
+
+    // Clear existing options
+    periodA.innerHTML = '<option value="">Sélectionner...</option>';
+    periodB.innerHTML = '<option value="">Sélectionner...</option>';
+
+    // Get all available periods
+    const allPeriods = [
+      ...Object.keys(monthlyData.current_year || {}),
+      ...Object.keys(monthlyData.previous_year || {})
+    ].sort().reverse();
+
+    // Populate options
+    allPeriods.forEach(period => {
+      const [year, month] = period.split('-');
+      const date = new Date(year, month - 1);
+      const label = date.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
+      
+      const optionA = new Option(label, period);
+      const optionB = new Option(label, period);
+      periodA.add(optionA);
+      periodB.add(optionB);
+    });
+  }
+
+  function comparePeriods() {
+    const periodAKey = document.getElementById('periodA').value;
+    const periodBKey = document.getElementById('periodB').value;
+
+    if (!periodAKey || !periodBKey) {
+      alert('Veuillez sélectionner deux périodes');
+      return;
+    }
+
+    if (periodAKey === periodBKey) {
+      alert('Veuillez sélectionner deux périodes différentes');
+      return;
+    }
+
+    // Get data for both periods
+    const dataA = getPeriodData(periodAKey);
+    const dataB = getPeriodData(periodBKey);
+
+    if (!dataA || !dataB) {
+      alert('Données non disponibles pour ces périodes');
+      return;
+    }
+
+    // Display results
+    displayComparison(periodAKey, dataA, periodBKey, dataB);
+  }
+
+  function getPeriodData(periodKey) {
+    const [year] = periodKey.split('-');
+    const currentYear = new Date().getFullYear();
+    
+    if (parseInt(year) === currentYear) {
+      return monthlyData.current_year?.[periodKey];
+    } else {
+      return monthlyData.previous_year?.[periodKey];
+    }
+  }
+
+  function displayComparison(keyA, dataA, keyB, dataB) {
+    // Format period labels
+    const labelA = formatPeriodLabel(keyA);
+    const labelB = formatPeriodLabel(keyB);
+
+    // Display summary cards
+    displaySummary(labelA, dataA, labelB, dataB);
+
+    // Display detailed table
+    displayTable(labelA, dataA, labelB, dataB);
+
+    // Show results section
+    document.getElementById('noData').style.display = 'none';
+    document.getElementById('resultsSection').style.display = 'block';
+  }
+
+  function formatPeriodLabel(key) {
+    const [year, month] = key.split('-');
+    const date = new Date(year, month - 1);
+    return date.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
+  }
+
+  function displaySummary(labelA, dataA, labelB, dataB) {
+    const summaryCards = document.getElementById('summaryCards');
+    
+    // Key indicators to show in summary
+    const keys = ['Chiffre d\'Affaires', 'EBE', 'Valeur Ajoutée'];
+    
+    summaryCards.innerHTML = keys.map(key => {
+      const valueA = dataA[key] || 0;
+      const valueB = dataB[key] || 0;
+      const variance = valueA - valueB;
+      const variancePct = valueB !== 0 ? ((variance / valueB) * 100) : 0;
+      const arrow = variance > 0 ? '↑' : variance < 0 ? '↓' : '→';
+      const colorClass = variance > 0 ? 'variance-positive' : variance < 0 ? 'variance-negative' : 'variance-neutral';
+
+      return `
+        <div class="summary-card">
+          <div class="summary-title">${key}</div>
+          <div class="summary-value">${valueA.toLocaleString('fr-FR', {maximumFractionDigits: 0})}</div>
+          <div class="summary-unit">MAD</div>
+          <div class="${colorClass}" style="margin-top: 15px; font-size: 18px;">
+            ${arrow} ${variancePct.toFixed(1)}%
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  function displayTable(labelA, dataA, labelB, dataB) {
+    const tbody = document.getElementById('comparisonBody');
+    
+    // Get all indicators
+    const allKeys = [...new Set([...Object.keys(dataA), ...Object.keys(dataB)])].sort();
+    
+    tbody.innerHTML = allKeys.map(key => {
+      const valueA = dataA[key] || 0;
+      const valueB = dataB[key] || 0;
+      const variance = valueA - valueB;
+      const variancePct = valueB !== 0 ? ((variance / valueB) * 100) : 0;
+      const colorClass = variance > 0 ? 'variance-positive' : variance < 0 ? 'variance-negative' : 'variance-neutral';
+
+      return `
+        <tr>
+          <td style="font-weight: 600;">${key}</td>
+          <td>${valueA.toLocaleString('fr-FR', {maximumFractionDigits: 0})} MAD</td>
+          <td>${valueB.toLocaleString('fr-FR', {maximumFractionDigits: 0})} MAD</td>
+          <td class="${colorClass}">${variance > 0 ? '+' : ''}${variance.toLocaleString('fr-FR', {maximumFractionDigits: 0})} MAD</td>
+          <td class="${colorClass}">${variance > 0 ? '+' : ''}${variancePct.toFixed(1)}%</td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  // Initialize
+  document.addEventListener('DOMContentLoaded', async () => {
+    try {
+      const data = await fetchData();
+      populateSelectors(data);
+      document.getElementById('noData').style.display = 'block';
+    } catch (error) {
+      console.error('Error loading data:', error);
+      alert('Erreur de chargement des données');
+    }
+  });
+</script>
+{% endblock %}

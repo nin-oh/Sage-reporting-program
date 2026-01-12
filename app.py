@@ -389,12 +389,77 @@ def report_page(client_id: str):
         year = None
 
     return render_template(
-        "report.html",
+        "dashboard.html",  # CHANGED: from report.html
         client_id=client_id,
+        page='dashboard',  # NEW: for navigation
         year=year or "",
         window_expires_at=iso(row["window_expires_at"]) if row.get("window_expires_at") else "",
         views_used=row.get("views_used", 0),
         max_views=MAX_VIEWS
+    )
+
+
+@app.get("/report/<client_id>/charts")
+def charts_page(client_id: str):
+    """Charts visualization page"""
+    client_id = client_id.strip()
+
+    # Check authentication
+    if not session.get(f"auth_{client_id}"):
+        return redirect(url_for("login_page", client_id=client_id))
+
+    # Check payload exists
+    conn = None
+    try:
+        conn = db_conn()
+        with conn.cursor() as cur:
+            cur.execute("SELECT payload_json FROM payloads WHERE client_id=%s", (client_id,))
+            prow = cur.fetchone()
+            if not prow:
+                return "No data available. Please contact provider.", 404
+    finally:
+        if conn is not None:
+            db_putconn(conn)
+
+    # Enforce window/view logic
+    row = require_active_window_or_403(client_id)
+
+    return render_template(
+        "charts.html",
+        client_id=client_id,
+        page='charts'
+    )
+
+
+@app.get("/report/<client_id>/compare")
+def compare_page(client_id: str):
+    """Monthly comparison page"""
+    client_id = client_id.strip()
+
+    # Check authentication
+    if not session.get(f"auth_{client_id}"):
+        return redirect(url_for("login_page", client_id=client_id))
+
+    # Check payload exists
+    conn = None
+    try:
+        conn = db_conn()
+        with conn.cursor() as cur:
+            cur.execute("SELECT payload_json FROM payloads WHERE client_id=%s", (client_id,))
+            prow = cur.fetchone()
+            if not prow:
+                return "No data available. Please contact provider.", 404
+    finally:
+        if conn is not None:
+            db_putconn(conn)
+
+    # Enforce window/view logic
+    row = require_active_window_or_403(client_id)
+
+    return render_template(
+        "compare.html",
+        client_id=client_id,
+        page='compare'
     )
 
 

@@ -1,0 +1,434 @@
+{% extends "base.html" %}
+
+{% block title %}Graphiques - Executive Dashboard{% endblock %}
+
+{% block extra_styles %}
+<style>
+  .charts-container {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(600px, 1fr));
+    gap: 40px;
+  }
+
+  .chart-card {
+    background: linear-gradient(135deg, #1a1a1a 0%, #0d0d0d 100%);
+    padding: 40px;
+    border-radius: 4px;
+    border: 1px solid rgba(212, 175, 55, 0.2);
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+  }
+
+  .chart-title {
+    font-family: 'Playfair Display', serif;
+    font-size: 24px;
+    font-weight: 700;
+    color: #d4af37;
+    margin-bottom: 30px;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+  }
+
+  .chart-canvas {
+    position: relative;
+    height: 400px;
+  }
+
+  .loading-chart {
+    text-align: center;
+    padding: 100px 20px;
+    color: rgba(212, 175, 55, 0.5);
+  }
+
+  @media (max-width: 768px) {
+    .charts-container {
+      grid-template-columns: 1fr;
+    }
+    .chart-canvas {
+      height: 300px;
+    }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div id="loadingCharts" class="loading-chart">
+  <div style="font-size: 48px; margin-bottom: 20px;">📊</div>
+  <div style="font-family: 'Cormorant Garamond', serif; font-size: 20px;">Chargement des graphiques...</div>
+</div>
+
+<div id="chartsContent" style="display: none;">
+  <div class="charts-container">
+    <!-- Chart 1: Monthly Revenue Trend -->
+    <div class="chart-card">
+      <h2 class="chart-title">📈 Évolution Mensuelle du CA</h2>
+      <div class="chart-canvas">
+        <canvas id="revenueChart"></canvas>
+      </div>
+    </div>
+
+    <!-- Chart 2: Monthly EBE -->
+    <div class="chart-card">
+      <h2 class="chart-title">💰 Évolution de l'EBE</h2>
+      <div class="chart-canvas">
+        <canvas id="ebeChart"></canvas>
+      </div>
+    </div>
+
+    <!-- Chart 3: Category Breakdown -->
+    <div class="chart-card">
+      <h2 class="chart-title">📊 Répartition par Catégorie</h2>
+      <div class="chart-canvas">
+        <canvas id="categoryChart"></canvas>
+      </div>
+    </div>
+
+    <!-- Chart 4: Top Indicators -->
+    <div class="chart-card">
+      <h2 class="chart-title">⭐ Top 10 Indicateurs</h2>
+      <div class="chart-canvas">
+        <canvas id="topChart"></canvas>
+      </div>
+    </div>
+
+    <!-- Chart 5: Quarterly Comparison -->
+    <div class="chart-card">
+      <h2 class="chart-title">📅 Comparaison Trimestrielle</h2>
+      <div class="chart-canvas">
+        <canvas id="quarterlyChart"></canvas>
+      </div>
+    </div>
+
+    <!-- Chart 6: Year-over-Year -->
+    <div class="chart-card">
+      <h2 class="chart-title">🔄 Comparaison Annuelle</h2>
+      <div class="chart-canvas">
+        <canvas id="yoyChart"></canvas>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+  const clientId = '{{ client_id }}';
+  
+  // Luxury chart colors
+  const colors = {
+    gold: '#d4af37',
+    lightGold: '#f4e5c3',
+    darkGold: '#b8941f',
+    gray: 'rgba(232, 232, 232, 0.8)',
+    transparent: 'rgba(212, 175, 55, 0.1)'
+  };
+
+  // Chart.js default configuration
+  Chart.defaults.color = colors.gray;
+  Chart.defaults.borderColor = 'rgba(212, 175, 55, 0.2)';
+  Chart.defaults.font.family = "'Montserrat', sans-serif";
+
+  async function fetchData() {
+    const res = await fetch(`/api/report/${encodeURIComponent(clientId)}`);
+    if (!res.ok) throw new Error('Failed to fetch data');
+    return await res.json();
+  }
+
+  function extractMonthlyData(monthlyData) {
+    if (!monthlyData) return { labels: [], datasets: {} };
+    
+    const currentYear = monthlyData.current_year || {};
+    const previousYear = monthlyData.previous_year || {};
+    
+    // Get months
+    const months = Object.keys(currentYear).sort();
+    const labels = months.map(m => {
+      const [year, month] = m.split('-');
+      return new Date(year, month - 1).toLocaleDateString('fr-FR', { month: 'short' });
+    });
+    
+    return { labels, currentYear, previousYear, months };
+  }
+
+  function createRevenueChart(ctx, data) {
+    const { labels, currentYear, previousYear, months } = extractMonthlyData(data.monthly_data);
+    
+    const currentCA = months.map(m => currentYear[m]?.['Chiffre d\'Affaires'] || currentYear[m]?.['Ventes de marchandises'] || 0);
+    const previousCA = months.map(m => {
+      const prevMonth = m.replace(/^\d{4}/, String(parseInt(m.split('-')[0]) - 1));
+      return previousYear[prevMonth]?.['Chiffre d\'Affaires'] || previousYear[prevMonth]?.['Ventes de marchandises'] || 0;
+    });
+
+    new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [
+          {
+            label: '2025',
+            data: currentCA,
+            borderColor: colors.gold,
+            backgroundColor: 'rgba(212, 175, 55, 0.1)',
+            borderWidth: 3,
+            tension: 0.4,
+            fill: true
+          },
+          {
+            label: '2024',
+            data: previousCA,
+            borderColor: colors.gray,
+            backgroundColor: 'rgba(232, 232, 232, 0.05)',
+            borderWidth: 2,
+            borderDash: [5, 5],
+            tension: 0.4,
+            fill: false
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: true, position: 'top' },
+          tooltip: {
+            callbacks: {
+              label: (context) => `${context.dataset.label}: ${context.parsed.y.toLocaleString('fr-FR')} MAD`
+            }
+          }
+        },
+        scales: {
+          y: {
+            beginAtZero: true,
+            ticks: {
+              callback: (value) => (value / 1000).toFixed(0) + 'K'
+            }
+          }
+        }
+      }
+    });
+  }
+
+  function createEBEChart(ctx, data) {
+    const { labels, currentYear, months } = extractMonthlyData(data.monthly_data);
+    
+    const ebeData = months.map(m => currentYear[m]?.['EBE'] || 0);
+
+    new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [{
+          label: 'EBE',
+          data: ebeData,
+          backgroundColor: colors.gold,
+          borderColor: colors.darkGold,
+          borderWidth: 1
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: (context) => `EBE: ${context.parsed.y.toLocaleString('fr-FR')} MAD`
+            }
+          }
+        },
+        scales: {
+          y: {
+            beginAtZero: true,
+            ticks: {
+              callback: (value) => (value / 1000).toFixed(0) + 'K'
+            }
+          }
+        }
+      }
+    });
+  }
+
+  function createCategoryChart(ctx, data) {
+    const cpcCount = Object.values(data.data || {}).filter(d => d.category === 'CPC').length;
+    const bilanCount = Object.values(data.data || {}).filter(d => d.category === 'Bilan').length;
+
+    new Chart(ctx, {
+      type: 'doughnut',
+      data: {
+        labels: ['Compte de Résultat', 'Bilan'],
+        datasets: [{
+          data: [cpcCount, bilanCount],
+          backgroundColor: [colors.gold, colors.gray],
+          borderColor: '#0a0a0a',
+          borderWidth: 3
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: true, position: 'bottom' }
+        }
+      }
+    });
+  }
+
+  function createTopChart(ctx, data) {
+    const allData = Object.entries(data.data || {})
+      .filter(([_, info]) => info.type === 'Montant')
+      .sort((a, b) => b[1].value - a[1].value)
+      .slice(0, 10);
+
+    new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: allData.map(([name]) => name.length > 25 ? name.substring(0, 25) + '...' : name),
+        datasets: [{
+          label: 'Montant (MAD)',
+          data: allData.map(([_, info]) => info.value),
+          backgroundColor: colors.gold,
+          borderColor: colors.darkGold,
+          borderWidth: 1
+        }]
+      },
+      options: {
+        indexAxis: 'y',
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: (context) => `${context.parsed.x.toLocaleString('fr-FR')} MAD`
+            }
+          }
+        },
+        scales: {
+          x: {
+            ticks: {
+              callback: (value) => (value / 1000000).toFixed(1) + 'M'
+            }
+          }
+        }
+      }
+    });
+  }
+
+  function createQuarterlyChart(ctx, data) {
+    const { currentYear, months } = extractMonthlyData(data.monthly_data);
+    
+    // Calculate quarterly totals
+    const quarters = ['Q1', 'Q2', 'Q3', 'Q4'];
+    const quarterlyCA = [0, 0, 0, 0];
+    
+    months.forEach(m => {
+      const month = parseInt(m.split('-')[1]);
+      const quarter = Math.floor((month - 1) / 3);
+      quarterlyCA[quarter] += currentYear[m]?.['Chiffre d\'Affaires'] || 0;
+    });
+
+    new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: quarters,
+        datasets: [{
+          label: 'CA Trimestriel',
+          data: quarterlyCA,
+          backgroundColor: [colors.gold, colors.lightGold, colors.gold, colors.lightGold],
+          borderColor: colors.darkGold,
+          borderWidth: 2
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: (context) => `${context.parsed.y.toLocaleString('fr-FR')} MAD`
+            }
+          }
+        },
+        scales: {
+          y: {
+            beginAtZero: true,
+            ticks: {
+              callback: (value) => (value / 1000000).toFixed(1) + 'M'
+            }
+          }
+        }
+      }
+    });
+  }
+
+  function createYoYChart(ctx, data) {
+    const { labels, currentYear, previousYear, months } = extractMonthlyData(data.monthly_data);
+    
+    const currentTotal = months.reduce((sum, m) => sum + (currentYear[m]?.['Chiffre d\'Affaires'] || 0), 0);
+    const previousTotal = months.reduce((sum, m) => {
+      const prevMonth = m.replace(/^\d{4}/, String(parseInt(m.split('-')[0]) - 1));
+      return sum + (previousYear[prevMonth]?.['Chiffre d\'Affaires'] || 0);
+    }, 0);
+
+    new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: ['2024', '2025'],
+        datasets: [{
+          label: 'Chiffre d\'Affaires Total',
+          data: [previousTotal, currentTotal],
+          backgroundColor: [colors.gray, colors.gold],
+          borderColor: [colors.gray, colors.darkGold],
+          borderWidth: 2
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: (context) => `${context.parsed.y.toLocaleString('fr-FR')} MAD`
+            }
+          }
+        },
+        scales: {
+          y: {
+            beginAtZero: true,
+            ticks: {
+              callback: (value) => (value / 1000000).toFixed(1) + 'M'
+            }
+          }
+        }
+      }
+    });
+  }
+
+  // Initialize charts
+  document.addEventListener('DOMContentLoaded', async () => {
+    try {
+      const data = await fetchData();
+      
+      createRevenueChart(document.getElementById('revenueChart').getContext('2d'), data);
+      createEBEChart(document.getElementById('ebeChart').getContext('2d'), data);
+      createCategoryChart(document.getElementById('categoryChart').getContext('2d'), data);
+      createTopChart(document.getElementById('topChart').getContext('2d'), data);
+      createQuarterlyChart(document.getElementById('quarterlyChart').getContext('2d'), data);
+      createYoYChart(document.getElementById('yoyChart').getContext('2d'), data);
+      
+      document.getElementById('loadingCharts').style.display = 'none';
+      document.getElementById('chartsContent').style.display = 'block';
+    } catch (error) {
+      console.error('Error loading charts:', error);
+      document.getElementById('loadingCharts').innerHTML = `
+        <div style="color: rgba(245, 87, 108, 0.9);">
+          <div style="font-size: 48px; margin-bottom: 20px;">⚠️</div>
+          <div>Erreur de chargement des graphiques</div>
+        </div>
+      `;
+    }
+  });
+</script>
+{% endblock %}

@@ -1,13 +1,9 @@
-<!DOCTYPE html>
-<html lang="fr">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Executive Dashboard</title>
+{% extends "base.html" %}
 
-  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600;700;800;900&family=Cormorant+Garamond:wght@300;400;500;600;700&family=Montserrat:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+{% block title %}Dashboard - Executive Dashboard{% endblock %}
 
-  <style>
+{% block extra_styles %}
+<style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
 
     /* LUXURY BLACK BACKGROUND WITH SUBTLE TEXTURE */
@@ -445,10 +441,10 @@
       .tab { padding: 12px 20px; }
     }
   </style>
-</head>
+{% endblock %}
 
-<body>
-  <!-- Loading Screen -->
+{% block content %}
+<!-- Loading Screen -->
   <div class="loading" id="loading">
     <div class="loading-content">
       <div class="loading-logo"></div>
@@ -818,5 +814,291 @@
       });
     });
   </script>
-</body>
-</html>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    // ---- state ----
+    let data = {};
+    let currentTab = 'all';
+    let currentSearch = '';
+    let excelData = null; // Store Excel file data
+
+    // ---- utilities ----
+    function getClientIdFromPath() {
+      // expected: /report/<client_id>
+      const parts = window.location.pathname.split('/').filter(Boolean);
+      if (parts.length >= 2 && parts[0] === 'report') return parts[1];
+      // fallback: ?client=
+      const q = new URLSearchParams(window.location.search).get('client');
+      return q || 'CLIENT';
+    }
+
+    function setLoadingText(clientId, text) {
+      document.getElementById('loadingClient').textContent = (clientId || 'CLIENT').toUpperCase();
+      document.getElementById('loadingSub').textContent = text;
+    }
+
+    function hideLoading() {
+      document.getElementById('loading').classList.add('hidden');
+    }
+
+    function showError(msg) {
+      const box = document.getElementById('errorBox');
+      document.getElementById('errorText').textContent = msg;
+      box.style.display = 'block';
+    }
+
+    function hideError() {
+      document.getElementById('errorBox').style.display = 'none';
+    }
+
+    function formatNumber(value) {
+      return new Intl.NumberFormat('fr-FR', { minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(value);
+    }
+
+    function animateNumber(id, target) {
+      const el = document.getElementById(id);
+      let current = 0;
+      const increment = target / 40;
+      const timer = setInterval(() => {
+        current += increment;
+        if (current >= target) {
+          el.textContent = Math.round(target);
+          clearInterval(timer);
+        } else {
+          el.textContent = Math.floor(current);
+        }
+      }, 25);
+    }
+
+    // ---- API fetch with retry (Render wake-up) ----
+    async function fetchReportWithRetry(clientId) {
+      const maxAttempts = 8;           // ~ up to 8 tries
+      const baseDelayMs = 1200;        // start delay
+
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+          setLoadingText(clientId, `Récupération des données... (tentative ${attempt}/${maxAttempts})`);
+
+          const res = await fetch(`/api/report/${encodeURIComponent(clientId)}`, {
+            headers: { 'Accept': 'application/json' },
+            cache: 'no-store'
+          });
+
+          if (res.ok) return await res.json();
+
+          // 403/404 => no point retry too much (trial ended or no data)
+          if (res.status === 403 || res.status === 404) {
+            const t = await res.text().catch(() => '');
+            throw new Error(`HTTP ${res.status} ${t || ''}`.trim());
+          }
+
+          // other status (502/503) => retry
+          await new Promise(r => setTimeout(r, baseDelayMs * attempt));
+        } catch (e) {
+          // network errors => retry
+          if (attempt === maxAttempts) throw e;
+          await new Promise(r => setTimeout(r, baseDelayMs * attempt));
+        }
+      }
+      throw new Error("Impossible de récupérer les données.");
+    }
+
+    // ---- rendering ----
+    function updateHeader(meta) {
+      document.title = `Executive Dashboard - ${meta.client || ''}`.trim();
+
+      document.getElementById('companyName').textContent = meta.client || '-';
+      document.getElementById('metaYear').textContent = `Exercice ${meta.year ?? '-'}`;
+      document.getElementById('metaUpdated').textContent = meta.updated_at ? meta.updated_at : '-';
+
+      // Excel download button
+      if (meta.excel_filename && meta.excel_b64) {
+        excelData = {
+          filename: meta.excel_filename,
+          b64: meta.excel_b64
+        };
+        document.getElementById('downloadExcelBtn').style.display = 'inline-flex';
+      }
+
+      // trial info
+      if (meta.trial) {
+        document.getElementById('trialBox').style.display = 'block';
+        document.getElementById('trialClient').textContent = meta.client || '-';
+        document.getElementById('trialValidUntil').textContent = meta.trial.valid_until || '-';
+        const used = meta.trial.views_used ?? '-';
+        const max = meta.trial.views_max ?? '-';
+        document.getElementById('trialViewsUsed').textContent = `${used}/${max}`;
+      } else {
+        document.getElementById('trialBox').style.display = 'none';
+      }
+    }
+
+    function downloadExcel() {
+      if (!excelData) {
+        alert('Fichier Excel non disponible');
+        return;
+      }
+
+      try {
+        // Convert base64 to blob
+        const binaryString = window.atob(excelData.b64);
+        const bytes = new Uint8Array(binaryString.length);
+        for (let i = 0; i < binaryString.length; i++) {
+          bytes[i] = binaryString.charCodeAt(i);
+        }
+        const blob = new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+
+        // Create download link
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = excelData.filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+      } catch (e) {
+        console.error('Download error:', e);
+        alert('Erreur lors du téléchargement: ' + e.message);
+      }
+    }
+
+    function updateStats() {
+      const total = Object.keys(data).length;
+      const cpc = Object.values(data).filter(d => d.category === 'CPC').length;
+      const bilan = Object.values(data).filter(d => d.category === 'Bilan').length;
+
+      animateNumber('totalIndicators', total);
+      animateNumber('cpcCount', cpc);
+      animateNumber('bilanCount', bilan);
+    }
+
+    function createResultCard(name, info) {
+      const card = document.createElement('div');
+      card.className = 'result-card';
+
+      let displayValue;
+      if (info.unit === 'jours' || info.unit === 'fois/an') displayValue = Math.round(info.value);
+      else displayValue = formatNumber(info.value);
+
+      card.innerHTML = `
+        <div class="category-badge">${info.category}</div>
+        <div class="result-name">${name}</div>
+        <div class="result-value">${displayValue}</div>
+        <div class="result-unit">${info.unit}</div>
+      `;
+      return card;
+    }
+
+    function addSection(container, title, items) {
+      if (!items || items.length === 0) return;
+
+      const header = document.createElement('div');
+      header.className = 'section-header';
+      header.textContent = title;
+      container.appendChild(header);
+
+      items.forEach(([name, info]) => container.appendChild(createResultCard(name, info)));
+    }
+
+    function displayResults(tab) {
+      currentTab = tab;
+      const container = document.getElementById('resultsContainer');
+      const noResults = document.getElementById('noResults');
+
+      container.innerHTML = '';
+      noResults.style.display = 'none';
+
+      let filtered = Object.entries(data);
+
+      if (tab === 'cpc') filtered = filtered.filter(([_, i]) => i.category === 'CPC');
+      else if (tab === 'bilan') filtered = filtered.filter(([_, i]) => i.category === 'Bilan');
+
+      // Apply search if typed
+      if (currentSearch && currentSearch.trim() !== '') {
+        const s = currentSearch.toLowerCase();
+        filtered = filtered.filter(([name]) => name.toLowerCase().includes(s));
+      }
+
+      if (filtered.length === 0) {
+        noResults.style.display = 'block';
+        return;
+      }
+
+      if (tab === 'all' || tab === 'cpc') {
+        addSection(container, 'Compte de Produits et Charges',
+          filtered.filter(([_, i]) => i.category === 'CPC' && i.type === 'Montant'));
+        addSection(container, 'Ratios de Gestion',
+          filtered.filter(([_, i]) => i.category === 'CPC' && i.type === 'Ratio'));
+      }
+
+      if (tab === 'all' || tab === 'bilan') {
+        addSection(container, 'Actif Immobilisé',
+          filtered.filter(([n, i]) => i.category === 'Bilan' && (n.includes('Immobilisation') || n.includes('Actif Immobilisé'))));
+
+        addSection(container, 'Actif Circulant',
+          filtered.filter(([n, i]) => i.category === 'Bilan' && (n.includes('Stock') || n.includes('Créances') || n.includes('Titres') || n.includes('Trésorerie Actif') || n.includes('Actif Circulant'))));
+
+        addSection(container, 'Capitaux Propres',
+          filtered.filter(([n, i]) => i.category === 'Bilan' && (n.includes('Capital') || n.includes('Réserves') || n.includes('Report') || n.includes('Résultat') || n.includes('Subventions') || n.includes('Provisions') || n.includes('Capitaux Propres'))));
+
+        addSection(container, 'Dettes et Passif',
+          filtered.filter(([n, i]) => i.category === 'Bilan' && (n.includes('Emprunts') || n.includes('Dettes') || n.includes('Trésorerie Passif'))));
+
+        addSection(container, 'Indicateurs Financiers',
+          filtered.filter(([_, i]) => i.category === 'Bilan' && i.type === 'Ratio'));
+      }
+    }
+
+    // ---- boot ----
+    document.addEventListener('DOMContentLoaded', async function() {
+      const clientId = getClientIdFromPath();
+      setLoadingText(clientId, 'Démarrage du service (Render wake-up)...');
+
+      try {
+        hideError();
+
+        // Fetch payload from backend (persistent)
+        const payload = await fetchReportWithRetry(clientId);
+
+        // payload shape: { client, year, updated_at, trial, data }
+        updateHeader(payload);
+        data = payload.data || {};
+
+        // Display immediately
+        updateStats();
+        displayResults('all');
+
+        // Done
+        hideLoading();
+      } catch (e) {
+        console.error(e);
+
+        // Keep luxury loading screen but show an error, then hide spinner
+        showError(
+          "Impossible de charger les données. " +
+          "Le serveur est peut-être en réveil, ou l'accès est expiré. " +
+          "Détails: " + (e && e.message ? e.message : String(e))
+        );
+        hideLoading();
+      }
+
+      // Search input
+      document.getElementById('searchInput').addEventListener('input', function(ev) {
+        currentSearch = (ev.target.value || '').trim();
+        displayResults(currentTab);
+      });
+
+      // Tabs
+      document.querySelectorAll('.tab').forEach(btn => {
+        btn.addEventListener('click', function() {
+          document.querySelectorAll('.tab').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          displayResults(btn.getAttribute('data-tab'));
+        });
+      });
+    });
+  </script>
+{% endblock %}

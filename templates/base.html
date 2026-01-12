@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{% block title %}Executive Dashboard{% endblock %}</title>
+  
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600;700;800;900&family=Cormorant+Garamond:wght@300;400;500;600;700&family=Montserrat:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'Montserrat', sans-serif;
+      background: #0a0a0a;
+      background-image:
+        radial-gradient(circle at 20% 50%, rgba(212, 175, 55, 0.03) 0%, transparent 50%),
+        radial-gradient(circle at 80% 80%, rgba(212, 175, 55, 0.02) 0%, transparent 50%);
+      color: #e8e8e8;
+      min-height: 100vh;
+    }
+
+    /* LUXURY NAVIGATION BAR */
+    .top-nav {
+      background: linear-gradient(135deg, #1a1a1a 0%, #0d0d0d 100%);
+      border-bottom: 2px solid rgba(212, 175, 55, 0.3);
+      padding: 0;
+      position: sticky;
+      top: 0;
+      z-index: 1000;
+      box-shadow: 0 4px 30px rgba(0, 0, 0, 0.7);
+    }
+
+    .nav-container {
+      max-width: 1800px;
+      margin: 0 auto;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0 40px;
+    }
+
+    .nav-logo {
+      font-family: 'Playfair Display', serif;
+      font-size: 20px;
+      font-weight: 700;
+      color: #d4af37;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      padding: 25px 0;
+    }
+
+    .nav-menu {
+      display: flex;
+      gap: 0;
+      list-style: none;
+      margin: 0;
+    }
+
+    .nav-menu li a {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 15px;
+      font-weight: 600;
+      color: rgba(212, 175, 55, 0.6);
+      text-decoration: none;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      transition: all 0.3s;
+      padding: 28px 30px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      border-bottom: 3px solid transparent;
+      position: relative;
+    }
+
+    .nav-menu li a:hover {
+      color: #d4af37;
+      background: rgba(212, 175, 55, 0.05);
+      border-bottom-color: rgba(212, 175, 55, 0.3);
+    }
+
+    .nav-menu li a.active {
+      color: #d4af37;
+      background: rgba(212, 175, 55, 0.1);
+      border-bottom-color: #d4af37;
+    }
+
+    .nav-user {
+      display: flex;
+      align-items: center;
+      gap: 25px;
+    }
+
+    .nav-client {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 14px;
+      color: rgba(244, 229, 195, 0.8);
+      letter-spacing: 1px;
+      font-weight: 600;
+    }
+
+    .nav-logout {
+      padding: 10px 24px;
+      background: rgba(212, 175, 55, 0.1);
+      border: 1px solid rgba(212, 175, 55, 0.3);
+      border-radius: 2px;
+      color: #d4af37;
+      text-decoration: none;
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      transition: all 0.3s;
+      font-family: 'Montserrat', sans-serif;
+    }
+
+    .nav-logout:hover {
+      background: rgba(212, 175, 55, 0.2);
+      border-color: #d4af37;
+      transform: translateY(-2px);
+      box-shadow: 0 4px 15px rgba(212, 175, 55, 0.2);
+    }
+
+    /* MOBILE MENU */
+    .mobile-toggle {
+      display: none;
+      background: none;
+      border: none;
+      color: #d4af37;
+      font-size: 28px;
+      cursor: pointer;
+      padding: 10px;
+    }
+
+    /* CONTENT AREA */
+    .main-content {
+      padding: 40px 30px;
+      max-width: 1800px;
+      margin: 0 auto;
+    }
+
+    /* RESPONSIVE */
+    @media (max-width: 1024px) {
+      .nav-container {
+        flex-wrap: wrap;
+        padding: 0 20px;
+      }
+
+      .mobile-toggle {
+        display: block;
+      }
+
+      .nav-menu {
+        display: none;
+        width: 100%;
+        flex-direction: column;
+        gap: 0;
+      }
+
+      .nav-menu.open {
+        display: flex;
+      }
+
+      .nav-menu li a {
+        padding: 20px 20px;
+        border-bottom: 1px solid rgba(212, 175, 55, 0.1);
+      }
+
+      .nav-user {
+        width: 100%;
+        justify-content: space-between;
+        padding: 20px 0;
+        border-top: 1px solid rgba(212, 175, 55, 0.2);
+      }
+    }
+
+    {% block extra_styles %}{% endblock %}
+  </style>
+</head>
+
+<body>
+  <!-- Navigation Bar -->
+  <nav class="top-nav">
+    <div class="nav-container">
+      <div class="nav-logo">EXECUTIVE DASHBOARD</div>
+      
+      <button class="mobile-toggle" onclick="toggleMobileMenu()">☰</button>
+      
+      <ul class="nav-menu" id="navMenu">
+        <li><a href="/report/{{ client_id }}" class="{% if page == 'dashboard' %}active{% endif %}">
+          📊 Vue d'ensemble
+        </a></li>
+        <li><a href="/report/{{ client_id }}/charts" class="{% if page == 'charts' %}active{% endif %}">
+          📈 Graphiques
+        </a></li>
+        <li><a href="/report/{{ client_id }}/compare" class="{% if page == 'compare' %}active{% endif %}">
+          🔄 Comparaison
+        </a></li>
+      </ul>
+
+      <div class="nav-user">
+        <span class="nav-client">{{ client_id }}</span>
+        <a href="/report/{{ client_id }}/logout" class="nav-logout">Déconnexion</a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Main Content -->
+  <div class="main-content">
+    {% block content %}{% endblock %}
+  </div>
+
+  <script>
+    function toggleMobileMenu() {
+      document.getElementById('navMenu').classList.toggle('open');
+    }
+  </script>
+
+  {% block extra_scripts %}{% endblock %}
+</body>
+</html>
